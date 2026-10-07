@@ -16,9 +16,12 @@ export default function CurrentCard({
   const today = daily[0];
   const local = cityNow(offset);
   const sub = [place.region, place.country].filter(Boolean).join(', ');
+  // Soft glow behind the icon, tinted to match the sky (warm sun, cool moon, blue rain).
+  const scene = describeCode(c.code).scene;
+  const glow = !c.isDay ? 'night' : scene === 'clear' ? 'sun' : scene === 'rain' || scene === 'storm' ? 'rain' : 'cloud';
 
   return (
-    <section className="card hero" aria-labelledby="hero-city">
+    <section className={`card hero hero--${glow}`} aria-labelledby="hero-city">
       <div className="hero-top">
         <div>
           <p className="eyebrow">
