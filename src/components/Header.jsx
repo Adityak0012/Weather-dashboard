@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Bookmark, Loader2, LocateFixed } from 'lucide-react';
 import SearchBar from './SearchBar.jsx';
+import WeatherArt from './WeatherArt.jsx';
 
 function UnitToggle({ units, onChange }) {
   const opts = [
@@ -34,11 +35,7 @@ export default function Header({
   return (
     <header className="header">
       <a className="brand" href="./" aria-label="WeatherNow home">
-        <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
-          <rect width="64" height="64" rx="16" fill="currentColor" opacity=".08" />
-          <circle cx="26" cy="26" r="9" fill="var(--accent)" />
-          <path d="M20 48a9 9 0 0 1 0-18 12 12 0 0 1 23 3 7.5 7.5 0 0 1 0 15H20Z" fill="var(--text)" />
-        </svg>
+        <span className="brand-mark"><WeatherArt kind="partly-day" size={26} /></span>
         <span className="brand-name">Weather<span>Now</span></span>
       </a>
 

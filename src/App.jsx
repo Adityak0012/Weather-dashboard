@@ -1,17 +1,32 @@
 import { motion, MotionConfig } from 'framer-motion';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import AirQualityCard from './components/AirQualityCard.jsx';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import Advice from './components/Advice.jsx';
 import Background from './components/Background.jsx';
-import CurrentCard from './components/CurrentCard.jsx';
-import DailyForecast from './components/DailyForecast.jsx';
 import Header from './components/Header.jsx';
-import Highlights from './components/Highlights.jsx';
+import Hero from './components/Hero.jsx';
 import HourlyForecast from './components/HourlyForecast.jsx';
 import SavedDrawer from './components/SavedDrawer.jsx';
 import { DashboardSkeleton, ErrorState, Toast, TopProgress } from './components/States.jsx';
-import SunCard from './components/SunCard.jsx';
+import StickyBar from './components/StickyBar.jsx';
+import Widgets from './components/Widgets.jsx';
+
+// The map (Leaflet) is loaded only when you scroll near it, keeping the first load fast.
+const StateMap = lazy(() => import('./components/StateMap.jsx'));
+
+function WhenNear({ children, fallback }) {
+  const ref = useRef(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    if (near || !ref.current) return undefined;
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) setNear(true); }, { rootMargin: '600px 0px' });
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [near]);
+  return <div ref={ref}>{near ? children : fallback}</div>;
+}
 import { useLocalStorage, useWeather } from './hooks/hooks.js';
 import { reverseGeocode } from './lib/api.js';
+import { dayShort } from './lib/time.js';
 import { temp } from './lib/units.js';
 import { sceneFor } from './lib/weatherCodes.js';
 
@@ -45,11 +60,20 @@ export default function App() {
   const [locating, setLocating] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState(null);
+  const [day, setDay] = useState(0);        // 0 = today, 1–6 = upcoming days
+  const [dayDir, setDayDir] = useState(1);  // slide direction for day changes
   const toastTimer = useRef(null);
 
   const weather = useWeather(place);
   const shown = weather.place ?? place; // the place the visible data belongs to
   const data = weather.data;
+
+  const chooseDay = (i) => {
+    setDayDir(i >= day ? 1 : -1);
+    setDay(i);
+  };
+  // Go back to "now" whenever a new place loads.
+  useEffect(() => { setDay(0); }, [weather.place?.lat, weather.place?.lon]);
 
   const notify = useCallback((text, tone = 'info') => {
     clearTimeout(toastTimer.current);
@@ -142,13 +166,22 @@ export default function App() {
     }
   };
 
-  const scene = data ? sceneFor(data.current.code, data.current.isDay) : 'clear-day';
   const placeKey = keyOf(shown);
+  const selDay = data?.daily[day] ? day : 0;
+  const scene = data
+    ? (selDay === 0 ? sceneFor(data.current.code, data.current.isDay) : sceneFor(data.daily[selDay].code, true))
+    : 'clear-day';
+  // Hours shown in the chart: the next 24 for today, or that whole day otherwise.
+  const hours = !data ? [] : selDay === 0
+    ? data.hourly
+    : data.hourlyAll.filter((h) => h.time.getUTCDate() === data.daily[selDay].date.getUTCDate()
+        && h.time.getUTCMonth() === data.daily[selDay].date.getUTCMonth());
 
   return (
     <MotionConfig reducedMotion="user">
       <Background scene={scene} />
       <TopProgress active={weather.refreshing} />
+      {data && <StickyBar place={shown} current={data.current} units={units} />}
       <a className="skip-link" href="#main">Skip to forecast</a>
 
       <div className="shell">
@@ -169,9 +202,9 @@ export default function App() {
           {!data && weather.status !== 'error' && <DashboardSkeleton />}
 
           {data && (
-            <motion.div className="grid" variants={page} initial="hidden" animate="show">
-              <motion.div variants={rise} className="area-hero">
-                <CurrentCard
+            <motion.div className="stack" variants={page} initial="hidden" animate="show">
+              <motion.div variants={rise}>
+                <Hero
                   place={shown}
                   data={data}
                   units={units}
@@ -181,21 +214,34 @@ export default function App() {
                   onRefresh={weather.reload}
                   refreshing={weather.refreshing}
                   updatedAt={weather.updatedAt}
+                  day={selDay}
+                  dayDir={dayDir}
+                  onDay={chooseDay}
                 />
               </motion.div>
-              <motion.div variants={rise} className="side-stack area-side">
-                <SunCard daily={data.daily} offset={data.offset} />
-                <AirQualityCard air={weather.air} />
+              <motion.div variants={rise}>
+                <Advice data={data} air={weather.air} units={units} placeKey={placeKey} />
               </motion.div>
-              <motion.div variants={rise} className="area-hourly">
-                <HourlyForecast hourly={data.hourly} units={units} placeKey={placeKey} />
+              <motion.div variants={rise} className="min0">
+                <HourlyForecast
+                  hours={hours}
+                  units={units}
+                  isNow={selDay === 0}
+                  title={selDay === 0 ? 'Next 24 hours' : `Hourly · ${dayShort(data.daily[selDay].date)}`}
+                  resetKey={`${placeKey}-${selDay}`}
+                />
               </motion.div>
-              <motion.div variants={rise} className="area-daily">
-                <DailyForecast daily={data.daily} current={data.current} units={units} placeKey={placeKey} />
+              <motion.div variants={rise}>
+                <Widgets data={data} air={weather.air} units={units} placeKey={placeKey} />
               </motion.div>
-              <motion.div variants={rise} className="area-highlights">
-                <Highlights current={data.current} units={units} placeKey={placeKey} />
-              </motion.div>
+              <WhenNear fallback={<div className="card map-placeholder" />}>
+                <Suspense fallback={<div className="card map-placeholder" />}>
+                  <StateMap
+                    units={units}
+                    onOpen={(p) => { selectPlace(p); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  />
+                </Suspense>
+              </WhenNear>
             </motion.div>
           )}
         </main>

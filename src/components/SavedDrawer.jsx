@@ -37,7 +37,7 @@ function SavedItem({ place, snap, units, active, onSelect, onRemove }) {
         </span>
         {snap ? (
           <span className="saved-wx">
-            <WeatherIcon code={snap.code} isDay={snap.isDay} size={22} />
+            <WeatherIcon code={snap.code} isDay={snap.isDay} size={30} />
             <span className="saved-temp">{temp(snap.temp, units)}°</span>
           </span>
         ) : (

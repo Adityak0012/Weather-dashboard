@@ -17,7 +17,7 @@ const CURRENT = [
   'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
   'visibility', 'uv_index', 'dew_point_2m',
 ].join(',');
-const HOURLY = 'temperature_2m,precipitation_probability,weather_code,is_day';
+const HOURLY = 'temperature_2m,precipitation_probability,weather_code,is_day,wind_speed_10m';
 const DAILY = [
   'weather_code', 'temperature_2m_max', 'temperature_2m_min', 'sunrise', 'sunset',
   'uv_index_max', 'precipitation_probability_max', 'precipitation_sum', 'wind_speed_10m_max',
@@ -82,18 +82,19 @@ export async function fetchForecast({ lat, lon }, signal) {
   const now = parseLocal(c.time);
   const thisHour = new Date(now); thisHour.setUTCMinutes(0, 0, 0);
 
-  let start = d.hourly.time.findIndex((t) => parseLocal(t) >= thisHour);
+  // Every hour of the 7 days (used when the user picks another day)...
+  const hourlyAll = d.hourly.time.map((t, i) => ({
+    time: parseLocal(t),
+    temp: d.hourly.temperature_2m[i],
+    pop: d.hourly.precipitation_probability?.[i] ?? 0,
+    code: d.hourly.weather_code[i],
+    isDay: !!d.hourly.is_day[i],
+    wind: d.hourly.wind_speed_10m?.[i] ?? null,
+  }));
+  // ...and the next 24 hours starting from now.
+  let start = hourlyAll.findIndex((h) => h.time >= thisHour);
   if (start < 0) start = 0;
-  const hourly = d.hourly.time.slice(start, start + 24).map((t, k) => {
-    const i = start + k;
-    return {
-      time: parseLocal(t),
-      temp: d.hourly.temperature_2m[i],
-      pop: d.hourly.precipitation_probability?.[i] ?? 0,
-      code: d.hourly.weather_code[i],
-      isDay: !!d.hourly.is_day[i],
-    };
-  });
+  const hourly = hourlyAll.slice(start, start + 24);
 
   const daily = d.daily.time.map((t, i) => ({
     date: parseLocal(t),
@@ -129,6 +130,7 @@ export async function fetchForecast({ lat, lon }, signal) {
       uv: c.uv_index,
     },
     hourly,
+    hourlyAll,
     daily,
   };
 }
@@ -163,4 +165,40 @@ export async function fetchSnapshots(places, signal) {
     code: x.current?.weather_code,
     isDay: !!x.current?.is_day,
   }));
+}
+
+/**
+ * Current conditions + today's range and rain chance for many places in a
+ * single request (used by the states map).
+ */
+export async function fetchRegionWeather(places, signal) {
+  const lats = places.map((p) => p.lat).join(',');
+  const lons = places.map((p) => p.lon).join(',');
+  const d = await getJSON(
+    `${FORECAST_URL}?latitude=${lats}&longitude=${lons}`
+      + '&current=temperature_2m,weather_code,is_day,relative_humidity_2m,wind_speed_10m'
+      + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+      + '&forecast_days=1&timezone=auto',
+    { signal, timeout: 15000 },
+  );
+  const list = Array.isArray(d) ? d : [d];
+  return list.map((x, i) => ({
+    ...places[i],
+    temp: x.current?.temperature_2m,
+    code: x.current?.weather_code,
+    isDay: !!x.current?.is_day,
+    humidity: x.current?.relative_humidity_2m,
+    wind: x.current?.wind_speed_10m,
+    max: x.daily?.temperature_2m_max?.[0],
+    min: x.daily?.temperature_2m_min?.[0],
+    pop: x.daily?.precipitation_probability_max?.[0] ?? 0,
+  }));
+}
+
+/** Past radar frames from RainViewer (free, no key). Tiles go up to zoom 7. */
+export async function fetchRadarFrames(signal) {
+  const d = await getJSON('https://api.rainviewer.com/public/weather-maps.json', { signal, timeout: 10000 });
+  const frames = d?.radar?.past ?? [];
+  if (!frames.length) throw new Error('No radar frames');
+  return { host: d.host, frames };
 }
